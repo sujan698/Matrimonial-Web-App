@@ -1,0 +1,300 @@
+{Demographic Detail,
+Family Detail,
+Personal Preferences,
+Interests} = profile
+
+
+profile ko laagi
+
+Personal Preferences{
+
+Maritial Status{single:1, widowed:2, divorced:3}
+Age Range
+Diet Preferences{Veg:1
+  NonVeg:2
+  Eggiterian:3
+  Vegan:4
+  NoPreference:5}
+Religion{ hinduism
+  buddhism
+  islam
+  christianity
+  others}
+Ethnicity{Brahmin
+  Chhetri
+  Newar
+  Gurung
+  Magar
+  Rai
+  Limbu
+  Tamang
+  Sherpa
+  Thakuri
+  Dalit
+  Madhesi
+  Janajati
+  Others}
+Family Class{MiddleClass
+  UpperClass
+  LowerClass}
+Education Level{PrimaryLevel
+  SecondaryLevel
+  HigherSecondaryLevel
+  Bachelor
+  Masters
+  PhD
+  Diploma}
+Employment Status{  Employed
+  SelfEmployed
+  Student
+  Unemployed
+  Retired}
+Residental Status{NepaliCitizen
+  PRHolder
+  NRN}
+Family Values{Traditional
+  Modern
+  Liberal}
+
+
+}
+
+
+Demographic Detail{
+Maritial Status{}
+Residental Status{}
+Education Level{}
+Employement Status{}
+Diet Preferences{}
+
+}
+
+Family Detail{
+Religion{}
+Ethnicity{}
+Gotra : Kaudinya
+
+}
+Interests{
+Animals:1,
+Travel:2,
+Food:3,
+Sports:4,
+Art:5,
+Movie:6,
+Music:7,
+Dancing:8,
+Singing:9,
+Comedy:10,
+Beauty:11,
+Science:12,
+Reading:13,
+Technology:14,
+Cooking:15,
+Fitness:16,
+Shopping:17,
+Writing:18,
+Business:19,
+Others:20
+
+
+}
+
+aba sabaiko enum lai value set garne!!
+
+
+
+To implement the cosine similarity algorithm for matching users in your MeroBihe project, follow these steps. The solution includes creating a matching service that filters users based on gender preferences, calculates compatibility scores using cosine similarity, and combines profile attributes, partner preferences, and interests.
+
+Step 1: Create the Matching Service
+Create a new file matching.service.ts in your NestJS project:
+
+typescript
+Copy
+// src/matching/matching.service.ts
+
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class MatchingService {
+  constructor(private prisma: PrismaService) {}
+
+  async findMatches(userId: number) {
+    // Fetch current user with preferences and profile details
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        PartnerPreference: true,
+        DemographicDetails: true,
+        FamilyDetails: true,
+        Interest: true,
+      },
+    });
+
+    if (!currentUser) throw new Error('User not found');
+
+    // Determine gender filter based on current user's gender
+    const genderFilter = this.getGenderFilter(currentUser.gender);
+
+    // Fetch potential candidates
+    const candidates = await this.prisma.user.findMany({
+      where: {
+        id: { not: userId },
+        gender: genderFilter,
+      },
+      include: {
+        PartnerPreference: true,
+        DemographicDetails: true,
+        FamilyDetails: true,
+        Interest: true,
+      },
+    });
+
+    // Calculate scores for each candidate
+    const matches = candidates.map(candidate => ({
+      ...candidate,
+      score: this.calculateTotalScore(currentUser, candidate),
+    }));
+
+    // Sort by score descending
+    return matches.sort((a, b) => b.score - a.score);
+  }
+
+  private getGenderFilter(userGender: string) {
+    switch (userGender) {
+      case 'Male': return 'Female';
+      case 'Female': return 'Male';
+      default: return undefined; // Non-binary sees all
+    }
+  }
+
+  private calculateTotalScore(currentUser: any, candidate: any) {
+    const prefScoreAB = this.calculatePreferenceScore(currentUser.PartnerPreference, candidate);
+    const prefScoreBA = this.calculatePreferenceScore(candidate.PartnerPreference, currentUser);
+    const interestSimilarity = this.calculateInterestSimilarity(currentUser.Interest, candidate.Interest);
+    
+    return (prefScoreAB + prefScoreBA) / 2 * 0.7 + interestSimilarity * 0.3;
+  }
+
+  private calculatePreferenceScore(preferences: any, profile: any) {
+    const attributes = [
+      { pref: preferences.maritalStatus, profile: profile.DemographicDetails.maritalStatus },
+      { pref: preferences.dietPreference, profile: profile.DemographicDetails.dietPreference },
+      { pref: preferences.religion, profile: profile.FamilyDetails.religion },
+      { pref: preferences.familyValues, profile: profile.FamilyDetails.familyValues },
+      { pref: preferences.ethnicity, profile: profile.FamilyDetails.ethnicity },
+      { pref: preferences.familyClass, profile: profile.FamilyDetails.familyClass },
+      { pref: preferences.residentialStatus, profile: profile.DemographicDetails.residentialStatus },
+      { pref: preferences.employmentStatus, profile: profile.DemographicDetails.employmentStatus },
+      { pref: preferences.educationLevel, profile: profile.DemographicDetails.educationLevel },
+      { ageMatch: this.checkAgeMatch(preferences.ageRange, profile.user.dob) },
+    ];
+
+    const matches = attributes.filter(attr => 
+      attr.ageMatch ? attr.ageMatch : attr.pref === attr.profile
+    ).length;
+
+    return Math.sqrt(matches) / Math.sqrt(10); // Cosine similarity
+  }
+
+  private checkAgeMatch(preferredAge: number, dob: string) {
+    const age = this.calculateAge(dob);
+    return Math.abs(age - preferredAge) <= 5;
+  }
+
+  private calculateAge(dob: string) {
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) age--;
+    return age;
+  }
+
+  private calculateInterestSimilarity(interestsA: any[], interestsB: any[]) {
+    const a = interestsA.map(i => i.interest);
+    const b = interestsB.map(i => i.interest);
+    const allInterests = [...new Set([...a, ...b])];
+    
+    const vectorA = allInterests.map(i => a.includes(i) ? 1 : 0);
+    const vectorB = allInterests.map(i => b.includes(i) ? 1 : 0);
+    
+    const dotProduct = vectorA.reduce((sum, val, i) => sum + val * vectorB[i], 0);
+    const magnitudeA = Math.sqrt(vectorA.reduce((sum, val) => sum + val * val, 0));
+    const magnitudeB = Math.sqrt(vectorB.reduce((sum, val) => sum + val * val, 0));
+
+    return magnitudeA && magnitudeB ? dotProduct / (magnitudeA * magnitudeB) : 0;
+  }
+}
+Step 2: Create Utility Helper
+Create an age calculation utility file age.utils.ts:
+
+typescript
+Copy
+// src/utils/age.utils.ts
+
+export function calculateAge(dob: string): number {
+  const birthDate = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+Step 3: Add Controller Endpoint
+Create a controller to expose the matching endpoint:
+
+typescript
+Copy
+// src/matching/matching.controller.ts
+
+import { Controller, Get, Param } from '@nestjs/common';
+import { MatchingService } from './matching.service';
+
+@Controller('matches')
+export class MatchingController {
+  constructor(private readonly matchingService: MatchingService) {}
+
+  @Get(':userId')
+  async getMatches(@Param('userId') userId: string) {
+    return this.matchingService.findMatches(parseInt(userId));
+  }
+}
+Step 4: Update App Module
+Register the service and controller in your app module:
+
+typescript
+Copy
+// src/app.module.ts
+
+import { Module } from '@nestjs/common';
+import { PrismaModule } from './prisma/prisma.module';
+import { MatchingService } from './matching/matching.service';
+import { MatchingController } from './matching/matching.controller';
+
+@Module({
+  imports: [PrismaModule],
+  controllers: [MatchingController],
+  providers: [MatchingService],
+})
+export class AppModule {}
+Explanation
+Gender Filtering: The service first filters potential matches based on the user's gender preference (male ↔ female, non-binary sees all).
+
+Cosine Similarity Calculation:
+
+Preference Matching: Compares 10 key attributes between user preferences and candidate profiles using cosine similarity.
+
+Interest Matching: Calculates similarity between interest vectors using standard cosine similarity.
+
+Score Combination: Combines preference matches (both directions) and interest similarity with weighted averages (70% preferences, 30% interests).
+
+Age Handling: Uses a ±5 year threshold around the preferred age range from the partner preferences.
+
+This implementation provides a scalable way to match users based on multiple criteria while maintaining readability and performance.
+
+
